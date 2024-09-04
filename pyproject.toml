@@ -8,11 +8,8 @@ packages = [{include = "yosafe_subpackage_3", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-requests = "^2.32.3"
 pytest = "^8.3.2"
-numpy = "^2.1.1"
-rich = "^13.8.0"
-
+typing-extensions = "4.6.3"
 
 [build-system]
 requires = ["poetry-core"]
