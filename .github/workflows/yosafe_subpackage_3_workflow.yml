@@ -8,12 +8,17 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch: 
 
 jobs:
   test-subpackage-3:
     runs-on: ubuntu-latest
+    
     steps:
-    - uses: actions/checkout@v4
+
+    - name: Checkout the code
+      uses: actions/checkout@v4
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -44,7 +49,7 @@ jobs:
       id: cache
       with:
         path: ./.venv
-        key: venv-${{ hashFiles('**/poetry.lock') }}
+        key: venv-${{ hashFiles('**/poetry.lock')}}
 
     - name: Install Poetry dependencies
       if: steps.cache.outputs.cache-hit != 'true'
@@ -56,45 +61,76 @@ jobs:
     - name: Test with pytest
       run: |
         source .venv/bin/activate
-        pip list
-        poetry run pytest -s
+        poetry run pytest -sv
 
-        
+  
   updating-parent-package:
     runs-on: ubuntu-latest
     needs: test-subpackage-3
-    ##if: needs.test-subpackage-1.outputs.cache-hit != 'true'
-    if:  false
+    #if: false
     env:
       G_ACCESS_TOKEN: ${{ secrets.G_ACCESS_TOKEN }}
       G_EMAIL: ${{ secrets.G_EMAIL }}
       G_NAME: ${{ secrets.G_NAME }}
       G_REPOSITORY: ${{ secrets.G_REPOSITORY }}
     steps:
+      - name: Checkout the code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      - name: Get current version from pyproject.toml
+        id: get_current_version
+        run: |
+          current_version=$(git show HEAD~0:pyproject.toml | grep -E 'version\s*=\s*\"' | sed 's/version = "//' | sed 's/"//')
+          echo "current_version=$current_version" >> $GITHUB_ENV
+          echo $(git log)
+
+      - name: Get previous version from the last commit
+        id: get_previous_version
+        run: |
+          # Check if the previous commit exists
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            # Get the previous version from the last commit's pyproject.toml
+            previous_version=$(git show HEAD~1:pyproject.toml | grep -E 'version\s*=\s*\"' | sed 's/version = "//' | sed 's/"//')
+            echo "previous_version=$previous_version"
+          else
+            echo "No previous commit found."
+            previous_version="none"
+          fi
+          echo "previous_version=$previous_version" >> $GITHUB_ENV
+      
+      - name: Check if version has changed
+        id: check_version_change
+        run: |
+          if [ "$current_version" != "$previous_version" ]; then
+            echo "Version has been updated from $previous_version to $current_version."
+            echo "version_updated=true" >> $GITHUB_ENV
+          else
+            echo "Version has not been updated."
+            echo "version_updated=false" >> $GITHUB_ENV
+          fi
+
       - name: Install pipx and Poetry
+        if: env.version_updated == 'true'
         run: |
           # Install pipx
           python -m pip install --user pipx
           python -m pipx ensurepath
-          
           # Install Poetry
           pipx install poetry
           poetry config virtualenvs.in-project true
 
-      - name: Clone the parent repository
+      - name: Update parent package
+        if: env.version_updated == 'true'
         run: |
           git clone https://github.com/$G_NAME/$G_REPOSITORY.git
-          cd yosafe_packages
-
-      - name: Update version and commit changes
-        run: |
-          # Update version
-          cd yosafe_packages
+          cd $G_REPOSITORY
           git config --global user.name "$G_NAME"
           git config --global user.email "$G_EMAIL"
           git config --global user.password "$G_ACCESS_TOKEN"
@@ -106,5 +142,7 @@ jobs:
 
           git add .
           git commit -m "${{ github.event.head_commit.message }}"
-          git push     
+          git push
+
+
 
